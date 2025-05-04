@@ -1,0 +1,399 @@
+﻿<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Botões Overlay Power BI</title>
+  <style>
+    body { font-family: Arial, sans-serif; }
+    #reportContainer {
+      width: 1920px;
+      height: 1080px;
+      position: relative;
+      border: 1px solid #ccc;
+      margin-top: 20px;
+    }
+    #reportContainer iframe {
+      z-index: 1;
+      position: relative;
+    }
+    .overlay-button {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      background-size: contain;
+      background-repeat: no-repeat;
+      cursor: pointer;
+      z-index: 9999;
+      transition: background-image 0.2s ease, transform 0.1s ease;
+      display: none;
+    }
+
+    #btn-omc.overlay-button {
+      width: 20px;
+      height: 20px;
+    }
+
+    /* Tooltip */
+    .overlay-button[data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #fff;
+      color: #000;
+      border: 1px solid #ccc;
+      padding: 4px 8px;
+      border-radius: 4px;
+      width: 200px;
+      white-space: normal;       /* permite quebra de linha */
+      word-wrap: break-word;     /* quebra palavras longas */
+      height: auto;              /* ajusta altura conforme conteúdo */
+      font-size: 12px;
+      display: none;
+      z-index: 10000;
+    }
+    .overlay-button[data-tooltip]::before {
+      content: "";
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%) translateY(4px);
+      border: 6px solid transparent;
+      border-top-color: #fff;
+      display: none;
+      z-index: 10000;
+    }
+    .overlay-button[data-tooltip]:hover::before,
+    .overlay-button[data-tooltip]:hover::after {
+      display: block;
+    }
+
+    /* Regra genérica para a área que intercepta o hover do card */
+    /*
+    .card-overlay {
+    position: absolute;
+    background: rgba(255, 0, 0, 0.2); 
+    cursor: default;
+    z-index: 9999;     
+    }*/
+
+    /* O seu tooltip “custom” */
+    /*
+    .card-overlay[data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    top: -8px;          
+    left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    color: #000;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 12px;
+    width: 200px;
+    white-space: normal;
+    word-break: break-word;
+    box-sizing: border-box;
+    display: none;
+    z-index: 10001;
+    }
+    .card-overlay[data-tooltip]:hover::after {
+      display: block;
+    }
+    .card-overlay[data-tooltip]::before {
+    content: "";
+    position: absolute;
+    top: -6px;
+    left: 50%;
+    transform: translateX(-50%) rotate(45deg);
+    width: 10px; height: 10px;
+    background: #fff;
+    border-left: 1px solid #ccc;
+    border-top: 1px solid #ccc;
+    display: none;
+    z-index: 10001;
+    }
+
+    .card-overlay[data-tooltip]:hover::before,
+    .card-overlay[data-tooltip]:hover::after {
+    display: block;
+    }*/
+
+  </style>
+  <script>
+    ['wheel','touchstart','touchmove'].forEach(ev =>
+      document.addEventListener(ev, ()=>{}, { passive: true })
+    );
+  </script>
+  <!-- MSAL e PowerBI SDK -->
+  <script src="https://alcdn.msauth.net/browser/2.31.0/js/msal-browser.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/powerbi-client/dist/powerbi.min.js"></script>
+</head>
+<body>
+  <h2>Embedding com Botões Overlay</h2>
+  <button id="loginButton">Fazer Login</button>
+  <div id="reportContainer"></div>
+  <script src="imagens.js"></script>
+  
+  <script>
+    const BASE_WIDTH  = 1280;
+    const BASE_HEIGHT = 720;
+    // botões estáticos
+    const botoes = [
+      { id:"btn-titulo",  top:"410", left:"264",  pageId:"99565d61bdef2b12490e", tooltip:"Clique para detalhamento" },
+      { id:"btn-defesa",  top:"410", left:"587",  pageId:"d4f2b999f0ce0f03194d", tooltip:"Clique para detalhamento" },
+      { id:"btn-extarif", top:"410", left:"911",  pageId:"68441e5f4f6a188dbc42", tooltip:"Clique para detalhamento" },
+      { id:"btn-acordos", top:"410", left:"1236", pageId:"ead2708b711235860cd1", tooltip:"Clique para detalhamento" },
+      { id:"btn-omc",     top:"325", left:"708",  pageId:"815d5b49b2ecd3e99527", tooltip:"Clique para detalhamento" }
+    ];
+    // cards das tooltips
+    /*const overlays = [
+      {
+        id: "overlay-excecao",
+        tooltip: "Tooltip do primeiro card",
+        top:    405,    // valor em px na base de 1280×720
+        left:   75,
+        width:  225,
+        height: 285
+      },
+      {
+        id: "overlay-outro",
+        tooltip: "Indica se a NCM contém destaques (“Ex-tarifários”) contidos em algum Regime de redução tarifária para bens não produzidos. Contempla três Regimes distintos: Ex-tarifários para BIT e BK, Autopeças não produzidas, e BK autopropulsados. Em caso positivo, é informado em qual(is) Regime(s) os Ex-tarifários estão inseridos. Também é disponibilizado um botão de detalhamento que leva a nova página com mais informações sobre as medidas.",
+        top:    405,    // outro exemplo de coordenada
+        left:   720,
+        width:  225,
+        height: 285
+      }
+    ];*/
+  
+    const PAGINA_HOME   = "721a88aed967955434ca"; // ID da página Visão Geral
+
+    // MSAL
+    const msalConfig = {
+      auth: {
+        clientId: "7120cf54-1724-4ee9-b13c-92db5e2a0929",
+        authority: "https://login.microsoftonline.com/3ec92969-5a51-4f18-8ac9-ef98fbafa978",
+        redirectUri: "http://localhost:3000"
+      }
+    };
+    const loginRequest = {
+      scopes: ["openid","profile","offline_access","https://analysis.windows.net/powerbi/api/.default"]
+    };
+    const msalInstance = new msal.PublicClientApplication(msalConfig);
+
+    document.getElementById("loginButton").addEventListener("click", async () => {
+      try {
+        const loginResp = await msalInstance.loginPopup(loginRequest);
+        msalInstance.setActiveAccount(loginResp.account);
+        const tokenResp = await msalInstance.acquireTokenSilent(loginRequest);
+        embedReport(tokenResp.accessToken);
+      } catch (err) {
+        console.error("Erro de login:", err);
+      }
+    });
+
+    // show/hide
+    function showOverlayButtons(visible) {
+      document.querySelectorAll(".overlay-button")
+        .forEach(b => b.style.display = visible ? "block" : "none");
+    }
+
+    function positionButtons() {
+      const container = document.getElementById("reportContainer");
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      const scaleX = cw / BASE_WIDTH;
+      const scaleY = ch / BASE_HEIGHT;
+
+      botoes.forEach(({ id, top: baseTop, left: baseLeft }) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.style.left   = `${Math.round(baseLeft * scaleX)}px`;
+        btn.style.top    = `${Math.round(baseTop  * scaleY)}px`;
+        if (id === "btn-omc") {
+          btn.style.width  = `${Math.round(25 * scaleX)}px`;
+          btn.style.height = `${Math.round(25 * scaleY)}px`;
+        } else {
+          btn.style.width  = `${Math.round(30 * scaleX)}px`;
+          btn.style.height = `${Math.round(30 * scaleY)}px`;
+        }
+      });
+    }
+
+    /*function positionOverlays() {
+      const container = document.getElementById("reportContainer");
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      const scaleX = cw / BASE_WIDTH;
+      const scaleY = ch / BASE_HEIGHT;
+
+      overlays.forEach(({ id, top, left, width, height }) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.left   = `${Math.round(left   * scaleX)}px`;
+        el.style.top    = `${Math.round(top    * scaleY)}px`;
+        el.style.width  = `${Math.round(width  * scaleX)}px`;
+        el.style.height = `${Math.round(height * scaleY)}px`;
+      });
+    }*/
+
+    function embedReport(accessToken) {
+      const models = window["powerbi-client"].models;
+      const config = {
+        type: "report",
+        tokenType: models.TokenType.Aad,
+        accessToken,
+        embedUrl: "https://app.powerbi.com/reportEmbed?reportId=65e48886-c092-4268-a277-5b66ce42f8ae&groupId=1e31e6ac-280a-410d-8291-23496592d9f7",
+        id: "65e48886-c092-4268-a277-5b66ce42f8ae",
+        permissions: models.Permissions.All,
+        settings: {
+          panes: { filters: { visible: false }, pageNavigation: { visible: false } }
+        }
+      };
+
+      const container = document.getElementById("reportContainer");
+
+      // evita o warning de non-passive listener em scroll-blocking events
+      function handleWheel(e) { /* nenhum código necessário */ }
+      container.addEventListener('wheel', handleWheel, { passive: true });
+
+      const report = powerbi.embed(container, config);
+
+      // mapeamento usando o título (displayName) do CardVisual
+      const mappings = [
+        { displayName:"Título Exceção",           column:"titulo_excecao",           buttonId:"btn-titulo"  },
+        { displayName:"Países Defesa",            column:"contagem_paises_defesa",   buttonId:"btn-defesa"  },
+        { displayName:"Ex-Tarifários",            column:"contagem_ex_tarifarios",   buttonId:"btn-extarif" },
+        { displayName:"Acordos Comerciais",       column:"contagem_paises_acordos",  buttonId:"btn-acordos" },
+        { displayName:"Códigos OMC",              column:"contagem_codigos_omc",     buttonId:"btn-omc"     }
+      ];
+
+      report.on("loaded", async () => {
+        console.log("Relatório carregado!");
+        // cria botões
+        botoes.forEach(({id, top, left, pageId, tooltip}) => {
+          const btn = document.createElement("div");
+          btn.id = id;
+          btn.className = "overlay-button";
+          btn.setAttribute("data-tooltip", tooltip);
+          btn.style.backgroundImage =`url('${imagemDefault}')`;
+          btn.addEventListener("mouseover", ()=> btn.style.backgroundImage = `url('${imagemHover}')`);
+          btn.addEventListener("mouseout",  ()=> btn.style.backgroundImage = `url('${imagemDefault}')`);
+          btn.addEventListener("mousedown", ()=> btn.style.transform = "translate(1px,1px)");
+          btn.addEventListener("mouseup",   ()=> btn.style.transform = "translate(0,0)");
+          btn.addEventListener("click", () => {
+            report.setPage(pageId)
+              .then(() => showOverlayButtons(pageId === PAGINA_HOME))
+              .catch(err => console.error(err));
+          });
+          container.appendChild(btn);
+        });
+
+        // — após criar cada botão, crie também o "capturador" do cartão:
+        /*overlays.forEach(cfg => {
+          const ov = document.createElement("div");
+          ov.id = cfg.id;
+          ov.className = "card-overlay";
+          ov.setAttribute("data-tooltip", cfg.tooltip);
+
+          // 3) Aplique já o estilo em % para ser responsivo:
+          Object.assign(ov.style, {
+            position: "absolute",
+            top:    `${(cfg.top    / BASE_HEIGHT * 100).toFixed(3)}%`,
+            left:   `${(cfg.left   / BASE_WIDTH  * 100).toFixed(3)}%`,
+            width:  `${(cfg.width  / BASE_WIDTH  * 100).toFixed(3)}%`,
+            height: `${(cfg.height / BASE_HEIGHT * 100).toFixed(3)}%`,
+            background: "rgba(0, 0, 255, 0.1)",
+            border:     "1px solid blue"
+          });
+
+          container.appendChild(ov);
+        });*/
+
+        async function refreshOverlayButtons() {
+          const page    = await report.getActivePage();
+          const visuals = await page.getVisuals();
+
+          // só cardVisuals
+          const cards = visuals.filter(v => v.type === "cardVisual");
+          console.log("▷ cardVisuals disponíveis:", cards.map(v=>({ name: v.name, title: v.title })));
+
+          for (let m of mappings) {
+            // encontra via título
+            const vis = cards.find(v => v.title === m.displayName);
+            const btn = document.getElementById(m.buttonId);
+            if (!vis || !btn) continue;
+
+            try {
+              const result = await vis.exportData(models.ExportDataType.Summarized, 1);
+              let val;
+              if (typeof result.data === "string") {
+                val = result.data.split(/\r?\n/)[1] || "-";
+              } else {
+                val = result.data[0][m.column];
+              }
+              console.log(`${m.displayName}:`, val);
+
+              // Se for o botão de Códigos OMC, só mostra se for > 1
+              if (m.buttonId === "btn-omc") {
+                btn.style.display = (Number(val) > 1) ? "block" : "none";
+              } else {
+                btn.style.display = (val !== "-" && val !== "'-" && val !== "0") ? "block" : "none";
+              }
+
+            } catch (err) {
+              console.warn("Não pôde exportar dados de", m.displayName, err);
+              btn.style.display = "none";
+            }
+          }
+        }
+
+        // inicial + pageChanged + bookmarkApplied
+        report.getActivePage()
+          .then(p => showOverlayButtons(p.name === PAGINA_HOME))
+          .catch(()=> showOverlayButtons(true));
+          
+        report.on("pageChanged",    async () => {
+            const p = await report.getActivePage();
+            showOverlayButtons(p.name === PAGINA_HOME);
+            await refreshOverlayButtons();
+
+        });
+        report.on("bookmarkApplied",async () => {
+            const p = await report.getActivePage();
+            showOverlayButtons(p.name === PAGINA_HOME);
+            await refreshOverlayButtons();
+        });
+
+        // dispara sempre que o relatório “repinta” (filtros, seleções, etc)
+        report.on("rendered", async () => {
+          const currentPage = await report.getActivePage();
+          if (currentPage.name === PAGINA_HOME) {
+            console.log("Relatório re-renderizado, refrescando botões…");
+            await refreshOverlayButtons();
+
+          }
+        });
+
+        // primeira chamada
+        await refreshOverlayButtons();
+        positionButtons(); 
+        report.on("rendered",   () => { refreshOverlayButtons(); positionButtons(); });
+        report.on("pageChanged", () => { refreshOverlayButtons(); positionButtons(); });
+        window.addEventListener("resize", () => { positionButtons(); });
+      
+        /*positionOverlays();
+        report.on("rendered",   () => { refreshOverlayButtons(); positionButtons(); positionOverlays(); });
+        report.on("pageChanged", () => { refreshOverlayButtons(); positionButtons(); positionOverlays(); });
+        window.addEventListener("resize", () => { positionButtons(); positionOverlays(); });*/
+      });
+
+      report.on("error", e => console.error(e.detail));
+    }
+  
+
+  </script>
+</body>
+</html>
