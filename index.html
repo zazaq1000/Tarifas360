@@ -141,8 +141,9 @@
   <script src="imagens.js"></script>
   
   <script>
-    const BASE_WIDTH  = 1440;
-    const BASE_HEIGHT = 810;
+
+    const BASE_WIDTH  = 1280;
+    const BASE_HEIGHT = 720;
 
     // botões estáticos
     const botoes = [
@@ -390,7 +391,12 @@
           positionButtons();
         });
         resizeObserver.observe(container); 
-               
+
+        // inclui variação de zoom (Ctrl + scroll) e pinch-zoom móvel
+        if (window.visualViewport) {
+          visualViewport.addEventListener('resize', positionButtons);
+        }
+        
         report.on("rendered", async () => {
           await refreshOverlayButtons();
           positionButtons();
