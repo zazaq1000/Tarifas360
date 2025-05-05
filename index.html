@@ -386,14 +386,21 @@
         await refreshOverlayButtons();
         positionButtons(); 
 
-        const container = document.getElementById("reportContainer");
-
         const resizeObserver = new ResizeObserver(() => {
           positionButtons();
         });
-        resizeObserver.observe(container);        
-        report.on("rendered",   () => { refreshOverlayButtons(); positionButtons(); });
-        report.on("pageChanged", () => { refreshOverlayButtons(); positionButtons(); });
+        resizeObserver.observe(container); 
+               
+        report.on("rendered", async () => {
+          await refreshOverlayButtons();
+          positionButtons();
+        });
+
+        report.on("pageChanged", async () => {
+          await refreshOverlayButtons();
+          positionButtons();
+        });
+
       
         /*positionOverlays();
         report.on("rendered",   () => { refreshOverlayButtons(); positionButtons(); positionOverlays(); });
