@@ -381,9 +381,15 @@
         // primeira chamada
         await refreshOverlayButtons();
         positionButtons(); 
+        
+        const container = document.getElementById("reportContainer");
+
+        const resizeObserver = new ResizeObserver(() => {
+          positionButtons();
+        });
+        resizeObserver.observe(container);        
         report.on("rendered",   () => { refreshOverlayButtons(); positionButtons(); });
         report.on("pageChanged", () => { refreshOverlayButtons(); positionButtons(); });
-        window.addEventListener("resize", () => { positionButtons(); });
       
         /*positionOverlays();
         report.on("rendered",   () => { refreshOverlayButtons(); positionButtons(); positionOverlays(); });
