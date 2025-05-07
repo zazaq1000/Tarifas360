@@ -244,10 +244,28 @@
         btn.style.top    = `${offsetY + top   * totalScale}px`;
 
         // redimensiona o botão
+        const pxLeft = offsetX + left  * totalScale;
+        const pxTop  = offsetY + top   * totalScale;
         const baseSize = (id === 'btn-omc') ? 25 : 30;
         const size     = Math.max(Math.round(baseSize * totalScale), 12);
+
+        btn.style.left   = `${pxLeft}px`;
+        btn.style.top    = `${pxTop}px`;
         btn.style.width  = `${size}px`;
         btn.style.height = `${size}px`;
+
+        // hecagem de limites:
+        const isInside =
+          pxLeft   >= 0 &&
+          pxTop    >= 0 &&
+          (pxLeft + size) < cw &&
+          (pxTop  + size) < ch;
+
+        // aplica visibilidade mantendo seu controle de display/filter
+        if (btn.style.display !== 'none') {
+          btn.style.visibility = isInside ? 'visible' : 'hidden';
+        }
+
       });
 }
 
