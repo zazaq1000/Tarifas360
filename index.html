@@ -130,7 +130,7 @@
     // -------------------------------------------------------------
     // BLOQUEIO GLOBAL DE ZOOM
     // -------------------------------------------------------------    
-    window.addEventListener('wheel', e => {
+    /*window.addEventListener('wheel', e => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();                // cancela o zoom
         console.debug('Zoom via wheel bloqueado');
@@ -143,7 +143,7 @@
         e.preventDefault();                // cancela Ctrl + + / - / 0
         console.debug('Zoom via teclado bloqueado');
       }
-    }, { capture: true });
+    }, { capture: true });*/
 
     // -------------------------------------------------------------
     // Funções utilitárias
@@ -187,6 +187,20 @@
     }
 
     /**
+     * Retorna o nível de zoom do navegador.
+     */
+    function getBrowserZoom() {
+      if (window.visualViewport && window.visualViewport.scale) {
+        return window.visualViewport.scale;
+      }
+      return window.devicePixelRatio || 1;
+    }
+
+    if (window.visualViewport) {
+      visualViewport.addEventListener('resize', positionButtons);
+    }
+
+    /**
      * Reposiciona e redimensiona todos os botões overlay conforme o tamanho do container.
      * Usa um único fator de escala (o mesmo que o Power BI) e calcula offsets para centralização.
      */
@@ -194,28 +208,48 @@
       const container = document.getElementById('reportContainer');
       const cw = container.clientWidth;
       const ch = container.clientHeight;
-      const scale = Math.min(cw / BASE_WIDTH, ch / BASE_HEIGHT) * currentZoom;
 
-      const offsetX = (cw - BASE_WIDTH * scale) / 2;
-      //const offsetY = (ch - BASE_HEIGHT * scale) / 2;
-      const offsetY = 0; // ← fixo no topo do iframe
+      // 1) escala de encaixe no container (16:9)
+      const fitScale     = Math.min(cw / BASE_WIDTH, ch / BASE_HEIGHT);
 
-      console.debug(`Positioning buttons: cw=${cw}, ch=${ch}, scale=${scale.toFixed(4)}, offsetX=${offsetX.toFixed(3)}, offsetY=${offsetY.toFixed(3)}`);
+      // 2) zoom interno do Power BI (via currentZoom)
+      const reportScale  = currentZoom;
+
+      // 3) zoom do navegador (via visualViewport / devicePixelRatio)
+      const browserScale = getBrowserZoom();
+
+      // combinação total das três
+      const totalScale   = fitScale * reportScale * browserScale;
+
+      // calcula o tamanho real do conteúdo
+      const contentW = BASE_WIDTH  * totalScale;
+      const contentH = BASE_HEIGHT * totalScale;
+
+      // offset para centrar o conteúdo
+      const offsetX = (cw - contentW) / 2;
+      const offsetY = 0; //(ch - contentH) / 2;
+
+      console.debug(
+        `fitScale=${fitScale.toFixed(2)}, reportScale=${reportScale.toFixed(2)}, ` +
+        `browserScale=${browserScale.toFixed(2)} → totalScale=${totalScale.toFixed(2)}; ` +
+        `offsetX=${offsetX.toFixed(1)}, offsetY=${offsetY.toFixed(1)}`
+      );
 
       botoes.forEach(({id, top, left}) => {
         const btn = document.getElementById(id);
         if (!btn) return;
-        //btn.style.left   = `${Math.round(offsetX + left  * scale)}px`;
-        //btn.style.top    = `${Math.round(offsetY + top   * scale)}px`;
-        btn.style.left = `${offsetX + left * scale}px`;
-        btn.style.top  = `${offsetY + top * scale}px`;
 
+        // posiciona em função do totalScale
+        btn.style.left   = `${offsetX + left  * totalScale}px`;
+        btn.style.top    = `${offsetY + top   * totalScale}px`;
+
+        // redimensiona o botão
         const baseSize = (id === 'btn-omc') ? 25 : 30;
-        const size = Math.max(Math.round(baseSize*scale),12); // tamanho mínimo p/ clicabilidade
+        const size     = Math.max(Math.round(baseSize * totalScale), 12);
         btn.style.width  = `${size}px`;
         btn.style.height = `${size}px`;
       });
-    }
+}
 
     /**
      * Busca e atualiza a visibilidade dos botões com base nos valores dos card visuals.
@@ -226,7 +260,13 @@
       const page = await report.getActivePage();
       const visuals = await page.getVisuals();
       const cards = visuals.filter(v => v.type === 'cardVisual');
-      console.debug('Card visuals disponíveis:', cards.map(v => v.title));
+
+      if (cards.length === 0) {
+        console.warn("Nenhum cardVisual encontrado — aguardando carregamento ou possível erro no embed.");
+      } else {
+        console.debug('Card visuals disponíveis:');
+        console.dir(cards); // Mostra estrutura completa dos visuais
+      }
 
       const mappings = [
         { title: 'Título Exceção',      field: 'titulo_excecao',         id: 'btn-titulo'  },
@@ -239,29 +279,64 @@
       for (let map of mappings) {
         const vis = cards.find(c => c.title === map.title);
         const btn = document.getElementById(map.id);
-        if (!vis || !btn) continue;
+        if (!vis || !btn) {
+          console.warn(`Visual ou botão não encontrado para: ${map.title}`);
+          continue;
+        }
 
         try {
-          const data   = await vis.exportData(models.ExportDataType.Summarized, 1);
-          const value  = Array.isArray(data.data)
-                        ? data.data[0][map.field]
-                        : data.data.split('\n')[1];
-          console.debug(`${map.title}:`, value);
+          const data = await vis.exportData(models.ExportDataType.Summarized, 1);
+          let value;
 
-          const normalized = String(value).trim();
+          if (Array.isArray(data.data)) {
+            value = data.data[0][map.field];
+          } else if (typeof data.data === 'string') {
+            const linhas = data.data.split('\n');
+            value = linhas.length > 1 ? linhas[1] : '';
+          } else {
+            value = '';
+          }
+
+          const normalized = String(value ?? '').trim();
+          console.debug(`🔍 Botão: ${map.id} | Valor bruto:`, value, '| Normalizado:', normalized);
 
           const show = (map.id === 'btn-omc')
-            ? Number(normalized) > 1
-            : (normalized !== '-' && normalized !== "'-" && normalized !== '0');
+            ? !isNaN(normalized) && Number(normalized) > 1
+            : Boolean(normalized && !['-', "'-", '0'].includes(normalized));
 
-          btn.style.display = show ? 'block' : 'none';   // ← recolocado
+          btn.style.display = show ? 'block' : 'none';
         } catch (err) {
-          console.warn(`Falha ao exportar dados de ${map.title}`, err);
+          console.warn(`⚠️ Falha ao exportar dados de "${map.title}"`, err);
           btn.style.display = 'none';
         }
       }
     }
-  
+
+    /**
+     * Sincroniza o slicer “NCM” com o valor recebido por URL.
+     * @param {powerbi.Report} report
+     * @param {string} valor - Ex.: "01012900"
+     */
+    async function sincronizaSlicerNCM(report, valor) {
+      const models = window['powerbi-client'].models;
+      const page   = await report.getActivePage();
+      const visual = (await page.getVisuals()).find(v => v.type === "slicer");
+
+      if (!visual) { console.warn("Slicer NCM não encontrado"); return; }
+
+      const estado = await visual.getSlicerState();
+      // mantém target/visualTargets já existentes
+      estado.filters = [{
+        $schema: "http://powerbi.com/product/schema#basic",
+        filterType: models.FilterType.Basic,
+        target:     estado.targets[0],   // mesma coluna do slicer
+        operator:   "In",
+        values:     [valor]
+      }];
+
+      await visual.setSlicerState(estado);
+    }    
+
     /**
      * Função principal de embedding do relatório Power BI.
      * @param {string} token - Token de acesso AAD.
@@ -272,6 +347,41 @@
       const reportId = '65e48886-c092-4268-a277-5b66ce42f8ae';
       const groupId  = '1e31e6ac-280a-410d-8291-23496592d9f7';
       const embedUrl = `https://app.powerbi.com/reportEmbed?reportId=${reportId}&groupId=${groupId}`;
+
+      function getFilterFromUrl(models) {
+        const params = new URLSearchParams(window.location.search);
+        const raw    = params.get('filter');
+        if (!raw) return null;
+
+        // split “NCM/codigo_desc eq '01012900'”
+        const [tableField, rawValue] = raw.split(" eq ");
+        if (!tableField || !rawValue) return null;
+
+        const [table, column] = tableField.split("/");
+        const cleanValue     = rawValue.replace(/'/g, "");
+
+        // Se for filtro em codigo_desc → Advanced / Contains
+        if (column.toLowerCase() === "codigo_desc") {
+          return {
+            $schema: "http://powerbi.com/product/schema#advanced",
+            filterType: models.FilterType.Advanced,
+            target: { table, column },
+            logicalOperator: "And",
+            conditions: [
+              { operator: "Contains", value: cleanValue }
+            ]
+          };
+        }
+
+        // Caso contrário → Basic / In na coluna limpa (ncm_sem_ponto)
+        return {
+          $schema: "http://powerbi.com/product/schema#basic",
+          filterType: models.FilterType.Basic,
+          target: { table, column },
+          operator: "In",
+          values: [cleanValue]
+        };
+      }
 
       const config = {
         type: 'report',
@@ -287,12 +397,46 @@
         }
       };
 
+      const filter = getFilterFromUrl(models);
+      console.log(">>> FILTER (antes do embed):", filter);
+
+      let codigoUrl = null;
+
+      if (filter) {
+        if (filter.filterType === models.FilterType.Basic) {
+          // basic → usa .values
+          codigoUrl = filter.values[0];
+        } else if (filter.filterType === models.FilterType.Advanced) {
+          // advanced → usa .conditions[].value
+          codigoUrl = filter.conditions[0].value;
+        }
+      }
+
       const container = document.getElementById('reportContainer');
       powerbi.reset(container);           // <--- limpa report anterior, se houver
       const report = powerbi.embed(container, config);
 
+      if (filter) {
+        try {
+          //await report.setFilters([filter]);
+          console.log("Filtro aplicado via setFilters:", filter);
+        } catch (e) {
+          console.warn("Falha ao aplicar filtro via setFilters:", e);
+        }
+      }
+
+
       report.on('loaded', async () => {
         console.info('Relatório carregado com sucesso.');
+
+        if (filter) {
+          try {
+            await report.setFilters([filter]);
+            console.info("✅ Filtro aplicado com sucesso via setFilters:", filter);
+          } catch (e) {
+            console.warn("⚠️ Falha ao aplicar filtro com setFilters:", e);
+          }
+        }
         // Cria e anexa cada botão overlay ao container
         if(!document.getElementById('btn-titulo')){        // evita duplicar
           botoes.forEach(({id, pageId, tooltip}) => {
@@ -329,7 +473,12 @@
         }
         
         // Eventos do relatório para atualização dos botões
+        let firstRender = true;
         report.on('rendered', async () => {
+          if (firstRender && codigoUrl) {
+            await sincronizaSlicerNCM(report, codigoUrl);
+            firstRender = false;
+          }
           await refreshOverlayButtons(report);
           await report.getZoom().then(z=>currentZoom=previousZoom=z).catch(()=>{});
           startZoomLogger(report);  // inicia o monitor de zoom periódico
