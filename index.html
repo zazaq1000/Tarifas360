@@ -455,29 +455,6 @@
             console.warn("⚠️ Falha ao aplicar filtro com setFilters:", e);
           }
         }
-        // Cria e anexa cada botão overlay ao container
-        if(!document.getElementById('btn-titulo')){        // evita duplicar
-          botoes.forEach(({id, pageId, tooltip}) => {
-            const btn = document.createElement('div');
-            btn.id = id;
-            btn.className = 'overlay-button';
-            btn.setAttribute('data-tooltip', tooltip);
-            btn.style.backgroundImage = `url('${imagemDefault}')`;
-            btn.addEventListener('mouseover', () => btn.style.backgroundImage = `url('${imagemHover}')`);
-            btn.addEventListener('mouseout',  () => btn.style.backgroundImage = `url('${imagemDefault}')`);
-            btn.addEventListener('mousedown', () => btn.style.transform = 'translate(1px,1px)');
-            btn.addEventListener('mouseup',   () => btn.style.transform = 'translate(0,0)');
-            btn.addEventListener('click', async () => {
-              try {
-                await report.setPage(pageId);
-                showOverlayButtons(pageId === PAGINA_HOME);
-              } catch (e) {
-                console.error('Erro ao mudar de página:', e);
-              }
-            });
-            container.appendChild(btn);
-          });
-        }
 
         // Inicializa handlers de redimensionamento e zoom
         /* Handlers de resize/zoom – criados uma única vez */
@@ -493,8 +470,35 @@
         // Eventos do relatório para atualização dos botões
         let firstRender = true;
         report.on('rendered', async () => {
-          if (firstRender && codigoUrl) {
-            await sincronizaSlicerNCM(report, codigoUrl);
+          if (firstRender) {
+            // Cria e anexa cada botão overlay ao container
+            if(!document.getElementById('btn-titulo')){        // evita duplicar
+              botoes.forEach(({id, pageId, tooltip}) => {
+                const btn = document.createElement('div');
+                btn.id = id;
+                btn.className = 'overlay-button';
+                btn.setAttribute('data-tooltip', tooltip);
+                btn.style.backgroundImage = `url('${imagemDefault}')`;
+                btn.addEventListener('mouseover', () => btn.style.backgroundImage = `url('${imagemHover}')`);
+                btn.addEventListener('mouseout',  () => btn.style.backgroundImage = `url('${imagemDefault}')`);
+                btn.addEventListener('mousedown', () => btn.style.transform = 'translate(1px,1px)');
+                btn.addEventListener('mouseup',   () => btn.style.transform = 'translate(0,0)');
+                btn.addEventListener('click', async () => {
+                  try {
+                    await report.setPage(pageId);
+                    showOverlayButtons(pageId === PAGINA_HOME);
+                  } catch (e) {
+                    console.error('Erro ao mudar de página:', e);
+                  }
+                });
+                container.appendChild(btn);
+              });
+            }
+          
+            if(codigoUrl) {
+              await sincronizaSlicerNCM(report, codigoUrl);
+            }
+            
             firstRender = false;
           }
           await refreshOverlayButtons(report);
