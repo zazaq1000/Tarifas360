@@ -2,559 +2,80 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <title>Botões Overlay Power BI</title>
-  <style>
-    /* Define a fonte padrão da página */
-    body { font-family: Arial, sans-serif; }
-
-    /* Oculta o menu de zoom nativo do Power BI embutido */
-    iframe[src*="app.powerbi.com"] ~ div .zoomLevelWrapper {
-      display: none !important;
-    }
-
-    /* Container responsivo do relatório, mantendo proporção 16:9 */
-    #reportContainer {
-      width: 100%;
-      max-width: 1440px;
-      aspect-ratio: 16 / 9;
-      height: auto;
-      border: 1px solid #ccc;
-      position: relative;
-      margin-top: 20px;
-    }
-
-    #reportContainer iframe {
-      width: 100% !important;
-      height: 100% !important;
-      position: absolute;
-      inset: 0;
-      border: none;
-      z-index: 1;               /* garante iframe abaixo dos botões */
-    }
-
-    /* Estilo base dos botões overlay */
-    .overlay-button {
-      position: absolute;
-      width: 30px;
-      height: 30px;
-      background-size: contain;
-      background-repeat: no-repeat;
-      cursor: pointer;
-      z-index: 9999;
-      transition: background-image 0.2s ease, transform 0.1s ease;
-      display: none;
-    }
-
-    /* Botão OMC menor por padrão */
-    #btn-omc.overlay-button {
-      width: 20px;
-      height: 20px;
-    }
-
-    /* Tooltip customizada para os botões */
-    .overlay-button[data-tooltip]::after {
-      content: attr(data-tooltip);
-      position: absolute;
-      bottom: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #fff;
-      color: #000;
-      border: 1px solid #ccc;
-      padding: 4px 8px;
-      border-radius: 4px;
-      white-space: normal;
-      word-wrap: break-word;
-      font-size: 12px;
-      display: none;
-      z-index: 10000;
-    }
-    .overlay-button[data-tooltip]::before {
-      content: "";
-      position: absolute;
-      bottom: 100%;
-      left: 50%;
-      transform: translateX(-50%) translateY(4px);
-      border: 6px solid transparent;
-      border-top-color: #fff;
-      display: none;
-      z-index: 10000;
-    }
-    .overlay-button[data-tooltip]:hover::before,
-    .overlay-button[data-tooltip]:hover::after {
-      display: block;
-    }
-  </style>
-  <!-- MSAL e PowerBI SDK -->
-  <script src="https://alcdn.msauth.net/browser/2.31.0/js/msal-browser.js"></script>
+  <title>Power BI Embed (App Owns Data)</title>
   <script src="https://cdn.jsdelivr.net/npm/powerbi-client/dist/powerbi.min.js"></script>
 </head>
 <body>
-  <h2>Embedding com Botões Overlay</h2>
-  <button id="loginButton">Fazer Login</button>
-  <div id="reportContainer"></div>
-  <script src="imagens.js"></script>
+  <h2>Painel Power BI</h2>
+  <div id="reportContainer" style="width:100%; height:90vh;"></div>
   <script>
-    // -------------------------------------------------------------
-    // Configurações iniciais
-    // -------------------------------------------------------------
+    // Função para ler o filtro da URL e montar o objeto para o Power BI
+    function getFilterFromUrl(models) {
+      const params = new URLSearchParams(window.location.search);
+      const raw = params.get('filter');
+      if (!raw) return null;
 
-    // Dimensões da grade interna do relatório (sempre 1280×720)
-    const BASE_WIDTH  = 1280;
-    const BASE_HEIGHT = 720;
+      // Suporta eq, contains, startswith
+      const m = raw.match(/^([A-Za-z0-9_]+)\/([A-Za-z0-9_]+)\s*(eq|contains|startswith)\s*'([^']+)'$/i);
+      if (!m) return null;
+      const [, table, column, op, value] = m;
 
-    /**
-     * Definição dos botões overlay: posição base, página e tooltip.
-     * top/left = coordenadas na grade 1280×720
-     */
-    const botoes = [
-      { id: "btn-titulo",  top: 370, left: 300,  pageId: "99565d61bdef2b12490e", tooltip: "Clique para detalhamento" },
-      { id: "btn-defesa",  top: 370, left: 588,  pageId: "d4f2b999f0ce0f03194d", tooltip: "Clique para detalhamento" },
-      { id: "btn-extarif", top: 370, left: 875,  pageId: "68441e5f4f6a188dbc42", tooltip: "Clique para detalhamento" },
-      { id: "btn-acordos", top: 370, left: 1166, pageId: "ead2708b711235860cd1", tooltip: "Clique para detalhamento" },
-      { id: "btn-omc",     top: 290, left: 695,  pageId: "815d5b49b2ecd3e99527", tooltip: "Clique para detalhamento" }
-    ];
-
-    const PAGINA_HOME = "721a88aed967955434ca";  // Página inicial do relatório
-
-    // MSAL Configuration
-    const msalConfig = {
-      auth: {
-        clientId: "7120cf54-1724-4ee9-b13c-92db5e2a0929",
-        authority: "https://login.microsoftonline.com/3ec92969-5a51-4f18-8ac9-ef98fbafa978",
-        redirectUri: window.location.origin
-      }
-    };
-    const msalInstance = new msal.PublicClientApplication(msalConfig);
-
-    // -------------------------------------------------------------
-    // BLOQUEIO GLOBAL DE ZOOM
-    // -------------------------------------------------------------    
-    /*window.addEventListener('wheel', e => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();                // cancela o zoom
-        console.debug('Zoom via wheel bloqueado');
-      }
-    }, { passive: false, capture: true }); // capture = true bloqueia antes de outros
-
-    // Bloqueia zoom por Ctrl + + / - / 0
-    window.addEventListener('keydown', e => {
-      if ((e.ctrlKey || e.metaKey) && [187, 189, 48].includes(e.keyCode)) {
-        e.preventDefault();                // cancela Ctrl + + / - / 0
-        console.debug('Zoom via teclado bloqueado');
-      }
-    }, { capture: true });*/
-
-    // -------------------------------------------------------------
-    // Funções utilitárias
-    // -------------------------------------------------------------
-
-    /**
-     * Adiciona listeners passivos para evitar warnings de scroll-blocking.
-     */
-    (['touchstart', 'touchmove']).forEach(ev =>
-      document.addEventListener(ev, () => {}, { passive: true })
-    );
-
-    /**
-     * Exibe ou oculta todos os botões overlay.
-     * @param {boolean} visible - Se true, mostra; se false, oculta.
-     */
-    function showOverlayButtons(visible) {
-      console.debug(`Overlay buttons visibility: ${visible}`);
-      document.querySelectorAll('.overlay-button')
-        .forEach(btn => btn.style.display = visible ? 'block' : 'none');
-    }
-
-    let currentZoom = 1, previousZoom = 1;
-    let zoomTimer = null;                 // <--- evita múltiplos setInterval
-
-    function startZoomLogger(report) {
-      if(zoomTimer) return;               // já existe, não duplica
-      zoomTimer = setInterval(async ()=>{
-        try {
-          const zoom = await report.getZoom();
-          if (zoom !== previousZoom) {
-            console.debug(`🟢 Zoom alterado: ${previousZoom.toFixed(2)} → ${zoom.toFixed(2)}`);
-            previousZoom = zoom;
-            currentZoom = zoom;
-            positionButtons(); // reposiciona ao detectar zoom
-          }
-        } catch (err) {
-          console.warn('Erro ao tentar capturar zoom no intervalo:', err);
-        }
-      }, 250); // verifica a cada [intervalo] segundo
-    }
-
-    /**
-     * Retorna o nível de zoom do navegador.
-     */
-    function getBrowserZoom() {
-      if (window.visualViewport && window.visualViewport.scale) {
-        return window.visualViewport.scale;
-      }
-      return window.devicePixelRatio || 1;
-    }
-
-    if (window.visualViewport) {
-      visualViewport.addEventListener('resize', positionButtons);
-    }
-
-    /**
-     * Reposiciona e redimensiona todos os botões overlay conforme o tamanho do container.
-     * Usa um único fator de escala (o mesmo que o Power BI) e calcula offsets para centralização.
-     */
-    function positionButtons() {
-      const container = document.getElementById('reportContainer');
-      const cw = container.clientWidth;
-      const ch = container.clientHeight;
-
-      // 1) escala de encaixe no container (16:9)
-      const fitScale     = Math.min(cw / BASE_WIDTH, ch / BASE_HEIGHT);
-
-      // 2) zoom interno do Power BI (via currentZoom)
-      const reportScale  = currentZoom;
-
-      // 3) zoom do navegador (via visualViewport / devicePixelRatio)
-      const browserScale = getBrowserZoom();
-
-      // combinação total das três
-      const totalScale   = fitScale * reportScale * browserScale;
-
-      // calcula o tamanho real do conteúdo
-      const contentW = BASE_WIDTH  * totalScale;
-      const contentH = BASE_HEIGHT * totalScale;
-
-      // offset para centrar o conteúdo
-      const offsetX = (cw - contentW) / 2;
-      const offsetY = 0; //(ch - contentH) / 2;
-
-      console.debug(
-        `fitScale=${fitScale.toFixed(2)}, reportScale=${reportScale.toFixed(2)}, ` +
-        `browserScale=${browserScale.toFixed(2)} → totalScale=${totalScale.toFixed(2)}; ` +
-        `offsetX=${offsetX.toFixed(1)}, offsetY=${offsetY.toFixed(1)}`
-      );
-
-      botoes.forEach(({id, top, left}) => {
-        const btn = document.getElementById(id);
-        if (!btn) return;
-
-        // posiciona em função do totalScale
-        btn.style.left   = `${offsetX + left  * totalScale}px`;
-        btn.style.top    = `${offsetY + top   * totalScale}px`;
-
-        // redimensiona o botão
-        const pxLeft = offsetX + left  * totalScale;
-        const pxTop  = offsetY + top   * totalScale;
-        const baseSize = (id === 'btn-omc') ? 25 : 30;
-        const size     = Math.max(Math.round(baseSize * totalScale), 12);
-
-        btn.style.left   = `${pxLeft}px`;
-        btn.style.top    = `${pxTop}px`;
-        btn.style.width  = `${size}px`;
-        btn.style.height = `${size}px`;
-
-        // hecagem de limites:
-        const isInside =
-          pxLeft   >= 0 &&
-          pxTop    >= 0 &&
-          (pxLeft + size) < cw &&
-          (pxTop  + size) < ch;
-
-        // aplica visibilidade mantendo seu controle de display/filter
-        if (btn.style.display !== 'none') {
-          btn.style.visibility = isInside ? 'visible' : 'hidden';
-        }
-
-      });
-}
-
-    /**
-     * Busca e atualiza a visibilidade dos botões com base nos valores dos card visuals.
-     * @param {powerbi.Report} report - Instância do relatório embedado.
-     */
-    async function refreshOverlayButtons(report) {
-      const models = window['powerbi-client'].models;
-      const page = await report.getActivePage();
-      const visuals = await page.getVisuals();
-      const cards = visuals.filter(v => v.type === 'cardVisual');
-
-      if (cards.length === 0) {
-        console.warn("Nenhum cardVisual encontrado — aguardando carregamento ou possível erro no embed.");
-      } else {
-        console.debug('Card visuals disponíveis:');
-        console.dir(cards); // Mostra estrutura completa dos visuais
-      }
-
-      const mappings = [
-        { title: 'Título Exceção',      field: 'titulo_excecao',         id: 'btn-titulo'  },
-        { title: 'Países Defesa',       field: 'contagem_paises_defesa', id: 'btn-defesa'  },
-        { title: 'Ex-Tarifários',       field: 'contagem_ex_tarifarios', id: 'btn-extarif' },
-        { title: 'Acordos Comerciais',  field: 'contagem_paises_acordos',id: 'btn-acordos' },
-        { title: 'Códigos OMC',         field: 'contagem_codigos_omc',   id: 'btn-omc'     }
-      ];
-
-      for (let map of mappings) {
-        const vis = cards.find(c => c.title === map.title);
-        const btn = document.getElementById(map.id);
-        if (!vis || !btn) {
-          console.warn(`Visual ou botão não encontrado para: ${map.title}`);
-          continue;
-        }
-
-        try {
-          const data = await vis.exportData(models.ExportDataType.Summarized, 1);
-          let value;
-
-          if (Array.isArray(data.data)) {
-            value = data.data[0][map.field];
-          } else if (typeof data.data === 'string') {
-            const linhas = data.data.split('\n');
-            value = linhas.length > 1 ? linhas[1] : '';
-          } else {
-            value = '';
-          }
-
-          const normalized = String(value ?? '').trim();
-          console.debug(`🔍 Botão: ${map.id} | Valor bruto:`, value, '| Normalizado:', normalized);
-
-          const show = (map.id === 'btn-omc')
-            ? !isNaN(normalized) && Number(normalized) > 1
-            : Boolean(normalized && !['-', "'-", '0'].includes(normalized));
-
-          btn.style.display = show ? 'block' : 'none';
-        } catch (err) {
-          console.warn(`⚠️ Falha ao exportar dados de "${map.title}"`, err);
-          btn.style.display = 'none';
-        }
-      }
-    }
-
-    /**
-     * Sincroniza o slicer “NCM” com o valor recebido por URL.
-     * @param {powerbi.Report} report
-     * @param {string} valor - Ex.: "01012900"
-     */
-    async function sincronizaSlicerNCM(report, valor) {
-      const models = window['powerbi-client'].models;
-      const page   = await report.getActivePage();
-      const visual = (await page.getVisuals()).find(v => v.type === "slicer");
-
-      if (!visual) { console.warn("Slicer NCM não encontrado"); return; }
-
-      const estado = await visual.getSlicerState();
-      // mantém target/visualTargets já existentes
-      estado.filters = [{
-        $schema: "http://powerbi.com/product/schema#basic",
-        filterType: models.FilterType.Basic,
-        target:     estado.targets[0],   // mesma coluna do slicer
-        operator:   "In",
-        values:     [valor]
-      }];
-
-      await visual.setSlicerState(estado);
-    }    
-
-    /**
-     * Função principal de embedding do relatório Power BI.
-     * @param {string} token - Token de acesso AAD.
-     */
-    async function embedReport(token) {
-      console.info('Iniciando embed do relatório...');
-      const models = window['powerbi-client'].models;
-      const reportId = '65e48886-c092-4268-a277-5b66ce42f8ae';
-      const groupId  = '1e31e6ac-280a-410d-8291-23496592d9f7';
-      const embedUrl = `https://app.powerbi.com/reportEmbed?reportId=${reportId}&groupId=${groupId}`;
-
-      function getFilterFromUrl(models) {
-        const params = new URLSearchParams(window.location.search);
-        const raw    = params.get('filter');
-        if (!raw) return null;
-
-        // split “NCM/codigo_desc eq '01012900'”
-        const [tableField, rawValue] = raw.split(" eq ");
-        if (!tableField || !rawValue) return null;
-
-        const [table, column] = tableField.split("/");
-        const cleanValue     = rawValue.replace(/'/g, "");
-
-        // Se for filtro em codigo_desc → Advanced / Contains
-        if (column.toLowerCase() === "codigo_desc") {
-          return {
-            $schema: "http://powerbi.com/product/schema#advanced",
-            filterType: models.FilterType.Advanced,
-            target: { table, column },
-            logicalOperator: "And",
-            conditions: [
-              { operator: "Contains", value: cleanValue }
-            ]
-          };
-        }
-
-        // Caso contrário → Basic / In na coluna limpa (ncm_sem_ponto)
+      if (op === "eq") {
         return {
           $schema: "http://powerbi.com/product/schema#basic",
           filterType: models.FilterType.Basic,
           target: { table, column },
           operator: "In",
-          values: [cleanValue]
+          values: [value]
         };
       }
-
-      const config = {
-        type: 'report',
-        tokenType: models.TokenType.Aad,
-        accessToken: token,
-        embedUrl,
-        id: reportId,
-        permissions: models.Permissions.All,
-        settings: {
-          panes: { filters: { visible: false }, pageNavigation: { visible: false } },
-          layoutType: models.LayoutType.Custom,
-          customLayout: { displayOption: models.DisplayOption.ActualSize }
-        }
-      };
-
-      const filter = getFilterFromUrl(models);
-      console.log(">>> FILTER (antes do embed):", filter);
-
-      let codigoUrl = null;
-
-      if (filter) {
-        if (filter.filterType === models.FilterType.Basic) {
-          // basic → usa .values
-          codigoUrl = filter.values[0];
-        } else if (filter.filterType === models.FilterType.Advanced) {
-          // advanced → usa .conditions[].value
-          codigoUrl = filter.conditions[0].value;
-        }
+      if (op === "contains" || op === "startswith") {
+        return {
+          $schema: "http://powerbi.com/product/schema#advanced",
+          filterType: models.FilterType.Advanced,
+          target: { table, column },
+          logicalOperator: "And",
+          conditions: [
+            { operator: op.charAt(0).toUpperCase() + op.slice(1), value }
+          ]
+        };
       }
-
-      const container = document.getElementById('reportContainer');
-      powerbi.reset(container);           // <--- limpa report anterior, se houver
-      const report = powerbi.embed(container, config);
-
-      if (filter) {
-        try {
-          //await report.setFilters([filter]);
-          console.log("Filtro aplicado via setFilters:", filter);
-        } catch (e) {
-          console.warn("Falha ao aplicar filtro via setFilters:", e);
-        }
-      }
-
-
-      report.on('loaded', async () => {
-        console.info('Relatório carregado com sucesso.');
-
-        if (filter) {
-          try {
-            await report.setFilters([filter]);
-            console.info("✅ Filtro aplicado com sucesso via setFilters:", filter);
-          } catch (e) {
-            console.warn("⚠️ Falha ao aplicar filtro com setFilters:", e);
-          }
-        }
-
-        // Inicializa handlers de redimensionamento e zoom
-        /* Handlers de resize/zoom – criados uma única vez */
-        if(!container._resizeObs){
-          const resizeObs = new ResizeObserver(positionButtons);
-          resizeObs.observe(container);
-          window.addEventListener('resize', positionButtons);
-          if (window.visualViewport) {
-            visualViewport.addEventListener('resize', positionButtons);
-          }
-        }
-        
-        // Eventos do relatório para atualização dos botões
-        let firstRender = true;
-        report.on('rendered', async () => {
-          if (firstRender) {
-            // Cria e anexa cada botão overlay ao container
-            if(!document.getElementById('btn-titulo')){        // evita duplicar
-              botoes.forEach(({id, pageId, tooltip}) => {
-                const btn = document.createElement('div');
-                btn.id = id;
-                btn.className = 'overlay-button';
-                btn.setAttribute('data-tooltip', tooltip);
-                btn.style.backgroundImage = `url('${imagemDefault}')`;
-                btn.addEventListener('mouseover', () => btn.style.backgroundImage = `url('${imagemHover}')`);
-                btn.addEventListener('mouseout',  () => btn.style.backgroundImage = `url('${imagemDefault}')`);
-                btn.addEventListener('mousedown', () => btn.style.transform = 'translate(1px,1px)');
-                btn.addEventListener('mouseup',   () => btn.style.transform = 'translate(0,0)');
-                btn.addEventListener('click', async () => {
-                  try {
-                    await report.setPage(pageId);
-                    showOverlayButtons(pageId === PAGINA_HOME);
-                  } catch (e) {
-                    console.error('Erro ao mudar de página:', e);
-                  }
-                });
-                container.appendChild(btn);
-              });
-            }
-          
-            if(codigoUrl) {
-              await sincronizaSlicerNCM(report, codigoUrl);
-            }
-            
-            firstRender = false;
-          }
-          await refreshOverlayButtons(report);
-          await report.getZoom().then(z=>currentZoom=previousZoom=z).catch(()=>{});
-          startZoomLogger(report);  // inicia o monitor de zoom periódico
-          positionButtons();
-        });
-
-        report.on('pageChanged', async () => {
-          showOverlayButtons((await report.getActivePage()).name === PAGINA_HOME);
-          await refreshOverlayButtons(report);
-          await report.getZoom().then(z=>currentZoom=previousZoom=z).catch(()=>{});
-          positionButtons();
-        });
-
-        // Primeira renderização
-        showOverlayButtons(true);               // ← inicialmente visíveis
-        await refreshOverlayButtons(report);
-        positionButtons();
-      });
-
-      report.on('error', e => console.error('PowerBI embed error:', e.detail));
+      return null;
     }
 
-    // -------------------------------------------------------------
-    // Fluxo de autenticação e início do embed
-    // -------------------------------------------------------------
-    document.getElementById('loginButton').addEventListener('click',async()=>{
-      console.info('Iniciando login…');
-      try{
-        /* 1 - Login interactivo (Popup) */
-        const login = await msalInstance.loginPopup({
-          scopes:['openid','profile','offline_access',
-                  'https://analysis.windows.net/powerbi/api/.default']
+    fetch('/api/embed-config')
+      .then(r => r.json())
+      .then(async config => {
+        const models = window['powerbi-client'].models;
+        const container = document.getElementById('reportContainer');
+        powerbi.reset(container);
+        const embedConfig = {
+          type: 'report',
+          id: config.reportId,
+          embedUrl: config.embedUrl,
+          accessToken: config.accessToken,
+          tokenType: models.TokenType.Embed,
+          settings: {
+            panes: { filters: { visible: false } }
+          }
+        };
+        const report = powerbi.embed(container, embedConfig);
+
+        // Aplica o filtro se houver na URL
+        const filter = getFilterFromUrl(models);
+        report.on('loaded', async () => {
+          if (filter) {
+            try {
+              await report.setFilters([filter]);
+              console.log('Filtro aplicado:', filter);
+            } catch (e) {
+              console.warn('Erro ao aplicar filtro:', e);
+            }
+          }
         });
-        msalInstance.setActiveAccount(login.account);
-        console.debug('Login OK:',login.account.username);
 
-        /* 2 - Tentativa silenciosa de token  */
-        let tokenResp;
-        try{
-          tokenResp = await msalInstance.acquireTokenSilent({
-            scopes:['https://analysis.windows.net/powerbi/api/.default']
-          });
-        }catch(e){
-          if(e instanceof msal.InteractionRequiredAuthError){
-            tokenResp = await msalInstance.acquireTokenPopup({
-              scopes:['https://analysis.windows.net/powerbi/api/.default']
-            });
-          }else throw e;
-        }
-        console.debug('Token obtido.');
-        await embedReport(tokenResp.accessToken);
-
-      }catch(err){ console.error('Erro de autenticação:',err); }
-    });
-      </script>
+        report.on('error', e => console.error('PowerBI embed error:', e.detail));
+      });
+  </script>
 </body>
 </html>
