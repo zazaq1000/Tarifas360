@@ -2,12 +2,31 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <title>Power BI Embed (App Owns Data)</title>
+  <title>Tarifas360</title>
   <script src="https://cdn.jsdelivr.net/npm/powerbi-client/dist/powerbi.min.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      border: none;
+      background: #fff;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #reportContainer {
+      width: 100vw;
+      height: 100vh;
+      border: none !important;
+      margin: 0;
+      padding: 0;
+    }
+  </style>
 </head>
 <body>
-  <h2>Painel Power BI</h2>
-  <div id="reportContainer" style="width:100%; height:90vh;"></div>
+  <div id="reportContainer"></div>
+
   <script>
     // Função para ler o filtro da URL e montar o objeto para o Power BI
     function getFilterFromUrl(models) {
@@ -15,7 +34,6 @@
       const raw = params.get('filter');
       if (!raw) return null;
 
-      // Suporta eq, contains, startswith
       const m = raw.match(/^([A-Za-z0-9_]+)\/([A-Za-z0-9_]+)\s*(eq|contains|startswith)\s*'([^']+)'$/i);
       if (!m) return null;
       const [, table, column, op, value] = m;
@@ -49,6 +67,7 @@
         const models = window['powerbi-client'].models;
         const container = document.getElementById('reportContainer');
         powerbi.reset(container);
+
         const embedConfig = {
           type: 'report',
           id: config.reportId,
@@ -56,12 +75,13 @@
           accessToken: config.accessToken,
           tokenType: models.TokenType.Embed,
           settings: {
-            panes: { filters: { visible: false } }
+            panes: { filters: { visible: false } },
+            navContentPaneEnabled: false  // Oculta a aba de navegação (VISÃO GERAL)
           }
         };
+
         const report = powerbi.embed(container, embedConfig);
 
-        // Aplica o filtro se houver na URL
         const filter = getFilterFromUrl(models);
         report.on('loaded', async () => {
           if (filter) {
