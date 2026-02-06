@@ -61,6 +61,20 @@
       return null;
     }
 
+    // Function to refresh the access token
+    async function refreshToken(report) {
+      try {
+        const response = await fetch('/api/embed-config');
+        const newConfig = await response.json();
+        await report.setAccessToken(newConfig.accessToken);
+        console.log('Token atualizado com sucesso');
+        return true;
+      } catch (error) {
+        console.error('Erro ao atualizar token:', error);
+        return false;
+      }
+    }
+
     fetch('/api/embed-config')
       .then(r => r.json())
       .then(async config => {
@@ -93,6 +107,19 @@
             }
           }
         });
+
+        // Handle token expiration and refresh
+        report.on('tokenExpired', async () => {
+          console.log('Token expirado, solicitando novo token...');
+          await refreshToken(report);
+        });
+
+        // Proactively refresh token every 50 minutes (before it expires)
+        // Power BI embed tokens typically expire after 60 minutes
+        setInterval(async () => {
+          console.log('Atualizando token preventivamente...');
+          await refreshToken(report);
+        }, 50 * 60 * 1000); // 50 minutes
 
         report.on('error', e => console.error('PowerBI embed error:', e.detail));
       });
