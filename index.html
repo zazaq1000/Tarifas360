@@ -65,6 +65,9 @@
     async function refreshToken(report) {
       try {
         const response = await fetch('/api/embed-config');
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const newConfig = await response.json();
         await report.setAccessToken(newConfig.accessToken);
         console.log('Token atualizado com sucesso');
@@ -111,15 +114,25 @@
         // Handle token expiration and refresh
         report.on('tokenExpired', async () => {
           console.log('Token expirado, solicitando novo token...');
-          await refreshToken(report);
+          const success = await refreshToken(report);
+          if (!success) {
+            console.error('Falha ao atualizar o token. Por favor, recarregue a página.');
+            // Optionally, you could show a user-friendly message or automatically reload
+            // alert('Sessão expirada. Por favor, recarregue a página.');
+          }
         });
 
         // Proactively refresh token every 50 minutes (before it expires)
         // Power BI embed tokens typically expire after 60 minutes
-        setInterval(async () => {
+        const refreshInterval = setInterval(async () => {
           console.log('Atualizando token preventivamente...');
           await refreshToken(report);
         }, 50 * 60 * 1000); // 50 minutes
+
+        // Clean up interval when page is unloaded
+        window.addEventListener('beforeunload', () => {
+          clearInterval(refreshInterval);
+        });
 
         report.on('error', e => console.error('PowerBI embed error:', e.detail));
       });
